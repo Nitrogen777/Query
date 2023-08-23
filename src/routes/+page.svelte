@@ -1,66 +1,170 @@
 <script lang="ts">
-    import { uuid } from "../stores/uuid.ts";
-    import { onMount } from 'svelte';
-    import { supabase } from "../client";
+    import { uuid } from "../stores/uuid";
+    import { get_creation_time, insert_new_question } from "../api";
+    import { onMount } from "svelte";
+    import { Jumper } from 'svelte-loading-spinners';
+    import RemoveQuestionButton from "../components/RemoveQuestionButton.svelte";
+    import { goAnswer, goHistory } from "../nav";
     var question = "";
-    var answer = "";
-    const insert = async () => {
-        const { error } = await supabase.rpc('new_question',{question: question, uuid: $uuid})
+    let loaded = false;
+    let time_limit: number;
+    var waiting = false;
+    const get_remaining_time = (miliseconds: number): string => {
+        let seconds_total = miliseconds/1000;
+        let minutes_total = seconds_total/60;
+        let hours = Math.floor(minutes_total/60);
+        let minutes = Math.floor(minutes_total)-hours*60;
+        let seconds = Math.floor(seconds_total)-(hours*60+minutes)*60;
+        let getString = (value: number) => value >= 10 ? `${value}` : `0${value}`;
+        return `${getString(hours)}:${getString(minutes)}:${getString(seconds)}`
+    }
+    onMount(async () => {
+        await loadTimer();
+    })
+    let timer:string | number | NodeJS.Timeout | undefined;
+    const loadTimer = async () => {
+        var creation_time = await get_creation_time($uuid);
+        if(creation_time == 0){
+            time_limit = -1;
+            return;
+        }
+        if(timer != undefined){
+            clearInterval(timer);
+        }
+        timer = setInterval(() => {
+            let creation = new Date(creation_time);
+            creation.setMinutes(creation.getMinutes()+1)
+            creation.setSeconds(0);
+            time_limit = 12*60*60*1000 - Date.now() + (creation.getTime());
+            if(time_limit <= 0){
+                clearInterval(timer);
+            }
+            if(!loaded){
+                loaded = true;
+            }
+        }, 1000);
+    }
+    const askOnClick = async () => {
+        waiting = true;
+        await insert_new_question(question, $uuid);
+        waiting = false;
+        loaded = false;
+        await loadTimer();
         question = "";
     }
-    interface Question {
-        id?: Number,
-        question?: String
-    }
-    interface Answer {
-        question: String,
-        response: String
-    }
-    var random_question: Question = {};
-    const randomize_question = async () => {
-        const { data } = await supabase.rpc('get_random_question', {v_uuid: $uuid})
-        random_question = data
-    }
-    var answered_questions: Answer[] = [];
-    const load_answered_questions = async () => {
-        const { data } = await supabase.from('responses').select('question,response').eq('uuid', $uuid);
-        if(data != null){
-            answered_questions = data;
-        }
-    }
-    const answer_random_question = async () => {
-        console.log({body: {query_id: random_question.id, answer: answer}})
-        const { error } = await supabase.functions.invoke('add_answer', {body: {query_id: random_question.id, answer: answer}})
-        console.log(error);
-        answer = "";
-    }
-    var loaded = false;
-    onMount(async () => {
-        await randomize_question();
-        await load_answered_questions();
-        loaded = true;
-    })
 </script>
 
 <style>
-    
+    .page{
+        height: 95vh;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        flex-direction: column;
+        justify-content: center;
+        font-family: sans-serif;
+    }
+    .form{
+        display: flex;
+        width: 100%;
+        align-items: center;
+        flex-direction: column;
+        justify-content: center;
+    }
+    .covered{
+        color: #FFFFFF;
+        opacity: 0.5;
+    }
+    h1{
+        color: #000000;
+    }
+    .ask {
+        margin-top: 15px;
+        border: none;
+        @apply bg-gray-300;
+        @apply rounded-full;
+        @apply text-white;
+        @apply font-bold;
+        @apply py-2;
+        @apply px-4;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+    }
+    .hoverlessask {
+        margin-top: 15px;
+        border: none;
+        @apply bg-gray-300;
+        @apply rounded-full;
+        @apply text-white;
+        @apply font-bold;
+        @apply py-2;
+        @apply px-4;
+    }
+    .ask:hover{
+        @apply bg-gray-400;
+    }
+    input{
+        border: none;
+        width: 50%;
+        @apply bg-gray-200;
+        @apply rounded-full;
+        @apply py-2;
+        @apply px-4;
+    }
+    .info{
+        margin-bottom: 0;
+        font-family: sans-serif;
+    }
+    .middle{
+        margin-top: 15px;
+        font-size: 12px;
+    }
+    .timer{
+        margin-top: 0;
+        font-size: 72px;
+        font-family: arial;
+        font-weight: bold;
+    }
+    .nav{
+        margin-top: 15px;
+        border: none;
+        @apply bg-blue-300;
+        @apply rounded-full;
+        @apply text-white;
+        @apply font-bold;
+        @apply py-2;
+        @apply px-4;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+    }
+    .nav:hover{
+        @apply bg-blue-400;
+    }
 </style>
 
-<div>
-    <p>your uuid is {$uuid}</p>
-    <input bind:value={question}/>
-    <button on:click={insert}>Y</button>
+<div class = "page">
     {#if loaded}
-    <h1>random question:</h1>
-    <p1>{random_question.question}</p1>
-    <br/>
-    <input bind:value={answer}/>
-    <button on:click={answer_random_question}>A</button>
-    <h1>answered questions:</h1>
-    {#each answered_questions as answer}
-	<p1>Question: {answer.question}</p1>
-    <p1>Answer: {answer.response}</p1>
-    <br/><br/>
-	{/each}
+    <div class = "{time_limit > 0 ? "form covered" : "form"}">
+        <h1>Ask a question</h1>
+        <input disabled = {time_limit > 0} bind:value={question}/>
+        <button disabled = {time_limit > 0} class = {time_limit > 0 ? "hoverlessask" : "ask"} on:click={askOnClick}>Query
+            {#if waiting}
+            <Jumper size="50" color="#FFFFFF" unit="px"/>
+            {/if}
+        </button>
+    </div>
+        {#if time_limit > 0}
+        <p class = "info">You can only have one question up at a given time</p>
+        <p class = "middle info">You current question will automatically expire in:</p>
+        <h2 class = "timer">{get_remaining_time(time_limit)}</h2>
+        <p class = "middle info">Or you can remove it now:</p>
+        <RemoveQuestionButton onRemoveClick = {async () => {loaded = false; await loadTimer();}}/>
+        {/if}
+        <button on:click={goAnswer} class="nav">Answer People's Queries</button>
+        <button on:click={goHistory} class="nav">Your Answered Queries</button>    
+    {:else}
+    <Jumper size="100" color="#AAAAAA" unit="px"/>
     {/if}
 </div>

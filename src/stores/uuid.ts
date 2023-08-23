@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store'
 import { browser } from "$app/environment"
-import { supabase } from "../client.ts"
+import { supabase } from "../client"
 
 let stored = undefined;
 if(browser){
